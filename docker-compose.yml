@@ -1,102 +1,142 @@
 version: "2"
 
 services:
-  cuckoo:
+  
+  cuckoodaemon:
     image: blacktop/cuckoo:2.0
     command: daemon
-    ports:
-      - "2042:2042"
+    container_name: cuckoodaemon
+    expose:
+      - "2042"
     volumes:
-      - ./cuckoo-tmp/:/tmp/cuckoo-tmp/
-      - ./storage/:/cuckoo/storage/
+      - /docker/cuckoo/data/cuckoo-tmp:/tmp/cuckoo-tmp/
+      - /docker/cuckoo/data/cuckoo-storage:/cuckoo/storage/
     networks:
       - cuckoo
     env_file:
-      - ./2.0/config-file.env
+      - ./cuckoo/2.0/config-file.env
+    depends_on:
+      - cuckooelasticsearch
+      - cuckoomongo
+      - cuckoopostgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1k"
+        max-file: "3"
 
-  web:
+  cuckooweb:
     image: blacktop/cuckoo:2.0
+    container_name: cuckooweb
+    depends_on:
+      - cuckoomongo
+      - cuckooelasticsearch
+      - cuckoopostgres
     ports:
-      - "80:31337"
-    links:
-      - mongo
-      - elasticsearch
-      - postgres
+      - "8080:31337"
     command: web
     volumes:
-      - ./cuckoo-tmp/:/tmp/cuckoo-tmp/
-      - ./storage/:/cuckoo/storage/
+      - /docker/cuckoo/data/cuckoo-tmp:/tmp/cuckoo-tmp/
+      - /docker/cuckoo/data/cuckoo-storage:/cuckoo/storage/
     networks:
       - cuckoo
     env_file:
-      - ./2.0/config-file.env
+      - ./cuckoo/2.0/config-file.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1k"
+        max-file: "3"
 
-  api:
+  cuckooapi:
     depends_on:
-      - postgres
+      - cuckoopostgres
+      - cuckoomongo
+      - cuckooelasticsearch
     image: blacktop/cuckoo:2.0
+    container_name: cuckooapi
     ports:
       - "8000:1337"
-    links:
-      - postgres
     command: api
     volumes:
-      - ./cuckoo-tmp/:/tmp/cuckoo-tmp/
-      - ./storage/:/cuckoo/storage/
+      - /docker/cuckoo/data/cuckoo-tmp:/tmp/cuckoo-tmp/
+      - /docker/cuckoo/data/cuckoo-storage:/cuckoo/storage/
     networks:
       - cuckoo
     env_file:
-      - ./2.0/config-file.env
+      - ./cuckoo/2.0/config-file.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1k"
+        max-file: "3"
 
-  # nginx:
-  #   build: nginx/.
-  #   depends_on:
-  #     - mongo
-  #   ports:
-  #     - "80:80"
-  #   links:
-  #     - mongo
-  #   networks:
-  #     - cuckoo
-
-  mongo:
+  cuckoomongo:
     image: mongo
-    ports:
-      - 27017
+    container_name: cuckoomongo
     volumes:
-      - mongo-data:/data/db
+      - /docker/cuckoomongo/data:/data/db/
+    expose:
+      - "27017"
     networks:
       - cuckoo
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1k"
+        max-file: "3"
 
-  elasticsearch:
+  cuckooelasticsearch:
     image: blacktop/elasticsearch:5.6
-    ports:
-      - 9200
+    container_name: cuckooelasticsearch
+    environment:
+      - bootstrap.memory_lock=true
+      - cluster.name=cuckoo
+      - thread_pool.index.queue_size=100000
+      - thread_pool.search.queue_size=100000
+      - thread_pool.bulk.queue_size=100000
     volumes:
-      - es-data:/usr/share/elasticsearch/data
+      - /docker/cuckooelasticsearch/data:/usr/share/elasticsearch/data
+    expose:
+      - "9200"
     networks:
       - cuckoo
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1k"
+        max-file: "3"
 
-  postgres:
+  cuckoopostgres:
     image: postgres
-    ports:
-      - 5432
+    container_name: cuckoopostgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: cuckoo
       PGDATA: /var/lib/postgresql/data/pgdata
-      # POSTGRES_INITDB_ARGS: --data-checksums
     volumes:
-      - postgres-data:/var/lib/postgresql/data/pgdata
+      - /docker/cuckoopostgres/data:/var/lib/postgresql/data/pgdata/
+    expose:
+      - "5432"
     networks:
-      - cuckoo
+      cuckoo:
+        aliases:
+          - postgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1k"
+        max-file: "3"
 
 networks:
   cuckoo:
-    driver: bridge
-
-volumes:
-  cuckoo-data:
-  mongo-data:
-  es-data:
-  postgres-data:
+    ipam:
+      config:
+        - subnet: 192.168.255.16/28
